@@ -1,0 +1,8 @@
+name = "taboola-s2s"
+main = "src/index.js"
+compatibility_date = "2024-06-01"
+
+[vars]
+TABOOLA_ACCOUNT_ID = "1968303"
+TABOOLA_EVENT_NAME = "make_purchase"
+DEFAULT_CURRENCY = "INR"

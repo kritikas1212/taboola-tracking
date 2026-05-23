@@ -1,0 +1,86 @@
+<!-- Taboola click-id capture -->
+<script>
+(function() {
+  function getCidFromUrl(url) {
+    if (!url) return null;
+    try {
+      var p = new URL(url, window.location.origin).searchParams;
+      return (
+        p.get('click-id') ||
+        p.get('click_id') ||
+        p.get('tb_click_id') ||
+        p.get('taboola_click_id') ||
+        p.get('tblci') ||
+        p.get('tblclid') ||
+        p.get('tbclid')
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  var cid = getCidFromUrl(window.location.href);
+  var firstLanding = null;
+
+  try {
+    firstLanding = localStorage.getItem('tb_first_landing_url');
+  } catch (e) {}
+
+  if (!firstLanding && cid) {
+    firstLanding = window.location.href;
+    try { localStorage.setItem('tb_first_landing_url', firstLanding); } catch (e) {}
+  }
+
+  if (cid) {
+    try { sessionStorage.setItem('tb_click_id', cid); } catch (e) {}
+    try { localStorage.setItem('tb_click_id', cid); } catch (e) {}
+  }
+
+  if (!cid) {
+    try { cid = sessionStorage.getItem('tb_click_id'); } catch (e) {}
+  }
+  if (!cid) {
+    try { cid = localStorage.getItem('tb_click_id'); } catch (e) {}
+  }
+
+  if (!cid && firstLanding) {
+    cid = getCidFromUrl(firstLanding);
+  }
+
+  if (!cid) return;
+
+  try {
+    if (sessionStorage.getItem('tb_cid_sent') === cid) return;
+  } catch (e) {}
+
+  function pushToCartAttributes(retryCount) {
+    fetch('/cart/update.js', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        attributes: {
+          tb_click_id: cid,
+          tb_landing_page_url_original: firstLanding || ''
+        }
+      })
+    })
+      .then(function(r) {
+        if (r.ok) {
+          try { sessionStorage.setItem('tb_cid_sent', cid); } catch (e) {}
+          console.log('[Taboola] click-id saved to cart:', cid.slice(0, 20) + '...');
+          return;
+        }
+        if (retryCount > 0) {
+          setTimeout(function() { pushToCartAttributes(retryCount - 1); }, 700);
+        }
+      })
+      .catch(function() {
+        if (retryCount > 0) {
+          setTimeout(function() { pushToCartAttributes(retryCount - 1); }, 700);
+        }
+      });
+  }
+
+  pushToCartAttributes(2);
+})();
+</script>
