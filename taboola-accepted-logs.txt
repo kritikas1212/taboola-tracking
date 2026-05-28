@@ -1,0 +1,23 @@
+Taboola accepted log excerpt
+
+---
+OPTIONS https://taboola-s2s.kritika-222.workers.dev/store-cid - Ok @ 5/26/2026, 11:31:01 AM
+OPTIONS https://taboola-s2s.kritika-222.workers.dev/store-cid - Ok @ 5/26/2026, 11:31:03 AM
+POST https://taboola-s2s.kritika-222.workers.dev/fastrr-webhook - Ok @ 5/26/2026, 11:31:44 AM
+  (log) Fastrr webhook received | stage: order_placed | cart_id: 6a153723fc9ff1320a18ce34
+  (log) COD fields: { latest_stage: 'ORDER_PLACED' }
+  (log) [findClickId] Extracted from landing_page_url
+  (log) Order: 6a153723fc9ff1320a18ce34 | revenue: 998 | click-id: GiC3sJdfEHXrroWoRIMZ...
+  (log) Sending to Taboola | order: 6a153723fc9ff1320a18ce34 | revenue: 998
+  (log) Taboola accepted | order: 6a153723fc9ff1320a18ce34
+
+---
+OPTIONS https://taboola-s2s.kritika-222.workers.dev/store-cid - Ok @ 5/26/2026, 11:51:03 AM
+  (log) [store-cid] Stored | cart: hWNCZPSlvJsM5oJFvFPOziZV?key=e035b10a42ddbcf121556a98af1af7e3 | cid: GiC3sJdfEHXrroWoRIMZ...
+POST https://taboola-s2s.kritika-222.workers.dev/fastrr-webhook - Ok @ 5/26/2026, 12:01:11 PM
+  (log) Fastrr webhook received | stage: order_placed | cart_id: 6a153de50e54003a62de5cd0
+  (log) COD fields: { latest_stage: 'ORDER_PLACED' }
+  (log) [findClickId] Extracted from landing_page_url
+  (log) Order: 6a153de50e54003a62de5cd0 | revenue: 998 | click-id: GiC3sJdfEHXrroWoRIMZ...
+  (log) Sending to Taboola | order: 6a153de50e54003a62de5cd0 | revenue: 998
+  (log) Taboola accepted | order: 6a153de50e54003a62de5cd0
