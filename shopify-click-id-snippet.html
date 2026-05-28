@@ -1,86 +1,253 @@
 <!-- Taboola click-id capture -->
 <script>
-(function() {
-  function getCidFromUrl(url) {
-    if (!url) return null;
+(function () {
+  'use strict';
+
+  var CLICK_PARAM_KEYS = ['tblci', 'click-id', 'click_id', 'tb_click_id', 'taboola_click_id', 'tblclid', 'tbclid'];
+  var LS_CID_KEY = 'tb_click_id';
+  var LS_LANDING_KEY = 'tb_first_landing_url';
+  var SS_CID_KEY = 'tb_click_id';
+  var RETRY_DELAY_MS = 500;
+  var MAX_RETRIES = 5;
+  var WORKER_STORE_URL = 'https://taboola-s2s.kritika-222.workers.dev/store-cid';
+
+  function getCookie(name) {
     try {
-      var p = new URL(url, window.location.origin).searchParams;
-      return (
-        p.get('click-id') ||
-        p.get('click_id') ||
-        p.get('tb_click_id') ||
-        p.get('taboola_click_id') ||
-        p.get('tblci') ||
-        p.get('tblclid') ||
-        p.get('tbclid')
-      );
+      var escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+      return match ? decodeURIComponent(match[1]) : null;
     } catch (e) {
       return null;
     }
   }
 
-  var cid = getCidFromUrl(window.location.href);
-  var firstLanding = null;
-
-  try {
-    firstLanding = localStorage.getItem('tb_first_landing_url');
-  } catch (e) {}
-
-  if (!firstLanding && cid) {
-    firstLanding = window.location.href;
-    try { localStorage.setItem('tb_first_landing_url', firstLanding); } catch (e) {}
+  function setCookie(name, value) {
+    try {
+      if (!value) return;
+      document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=2592000; samesite=lax';
+    } catch (e) {}
   }
 
-  if (cid) {
-    try { sessionStorage.setItem('tb_click_id', cid); } catch (e) {}
-    try { localStorage.setItem('tb_click_id', cid); } catch (e) {}
+  function extractCid(urlStr) {
+    if (!urlStr) return null;
+    try {
+      var params = new URL(urlStr, 'https://fallback.local').searchParams;
+      for (var i = 0; i < CLICK_PARAM_KEYS.length; i += 1) {
+        var value = params.get(CLICK_PARAM_KEYS[i]);
+        if (value && value.length > 20) return value;
+      }
+    } catch (e) {}
+    return null;
   }
 
-  if (!cid) {
-    try { cid = sessionStorage.getItem('tb_click_id'); } catch (e) {}
+  var currentHref = window.location.href;
+  var currentCid = extractCid(currentHref);
+
+  var storedLanding = null;
+  var storedCid = null;
+  try { storedLanding = localStorage.getItem(LS_LANDING_KEY); } catch (e) {}
+  if (!storedLanding) storedLanding = getCookie(LS_LANDING_KEY);
+  try { storedCid = localStorage.getItem(LS_CID_KEY); } catch (e) {}
+  try { if (!storedCid) storedCid = sessionStorage.getItem(SS_CID_KEY); } catch (e) {}
+  if (!storedCid) storedCid = getCookie(LS_CID_KEY);
+
+  if (!storedLanding) {
+    storedLanding = currentHref;
+    try { localStorage.setItem(LS_LANDING_KEY, currentHref); } catch (e) {}
+    setCookie(LS_LANDING_KEY, currentHref);
   }
-  if (!cid) {
-    try { cid = localStorage.getItem('tb_click_id'); } catch (e) {}
+
+  if (currentCid) {
+    storedCid = currentCid;
+    try { localStorage.setItem(LS_CID_KEY, currentCid); } catch (e) {}
+    try { sessionStorage.setItem(SS_CID_KEY, currentCid); } catch (e) {}
+    setCookie(LS_CID_KEY, currentCid);
   }
 
-  if (!cid && firstLanding) {
-    cid = getCidFromUrl(firstLanding);
+  if (!storedCid && storedLanding) storedCid = extractCid(storedLanding);
+
+  var activeCid = currentCid || storedCid;
+  var activeLanding = storedLanding || (activeCid ? currentHref : null);
+
+  if (!activeCid) {
+    console.log('[Taboola] No click-id found on this page or in storage');
+    return;
   }
 
-  if (!cid) return;
+  console.log('[Taboola] Active click-id:', activeCid.slice(0, 20) + '...');
 
-  try {
-    if (sessionStorage.getItem('tb_cid_sent') === cid) return;
-  } catch (e) {}
+  function getStoreDedupKey(cartToken) {
+    return 'tb_worker_store_sent:' + String(cartToken || '').trim() + ':' + String(activeCid || '').trim();
+  }
 
-  function pushToCartAttributes(retryCount) {
-    fetch('/cart/update.js', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        attributes: {
-          tb_click_id: cid,
-          tb_landing_page_url_original: firstLanding || ''
-        }
+  function normalizeCartIds(cartToken) {
+    var ids = [];
+    var raw = String(cartToken || '').trim();
+    if (raw) ids.push(raw);
+
+    try {
+      if (window.Shopify && window.Shopify.cart && window.Shopify.cart.token) {
+        ids.push(String(window.Shopify.cart.token).trim());
+      }
+    } catch (e) {}
+
+    return ids.filter(function (value, index, array) {
+      return value && array.indexOf(value) === index;
+    });
+  }
+
+  function postCidToWorker(cartToken) {
+    var cartIds = normalizeCartIds(cartToken);
+    if (!WORKER_STORE_URL || !cartIds.length) return;
+
+    var dedupKey = getStoreDedupKey(cartIds[0]);
+    try {
+      if (sessionStorage.getItem(dedupKey) === '1') return;
+    } catch (e) {}
+
+    try { sessionStorage.setItem(dedupKey, '1'); } catch (e) {}
+
+    cartIds.forEach(function (id) {
+      fetch(WORKER_STORE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cart_id: id,
+          cart_token: id,
+          checkout_id: id,
+          click_id: activeCid,
+          landing: activeLanding || ''
+        })
       })
-    })
-      .then(function(r) {
-        if (r.ok) {
-          try { sessionStorage.setItem('tb_cid_sent', cid); } catch (e) {}
-          console.log('[Taboola] click-id saved to cart:', cid.slice(0, 20) + '...');
-          return;
-        }
-        if (retryCount > 0) {
-          setTimeout(function() { pushToCartAttributes(retryCount - 1); }, 700);
-        }
+        .then(function (r) {
+          console.log('[Taboola] Worker CID store:', r.status, '| cart:', id);
+        })
+        .catch(function (e) {
+          console.warn('[Taboola] Worker CID store failed:', e.message);
+        });
+    });
+  }
+
+  function readCartToken() {
+    return fetch('/cart.js', { credentials: 'same-origin' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('cart.js HTTP ' + r.status);
+        return r.json();
       })
-      .catch(function() {
-        if (retryCount > 0) {
-          setTimeout(function() { pushToCartAttributes(retryCount - 1); }, 700);
-        }
+      .then(function (cart) {
+        var token = cart && (cart.token || cart.cart_token || cart.checkout_token) ? String(cart.token || cart.cart_token || cart.checkout_token).trim() : '';
+        return token || null;
+      })
+      .catch(function () {
+        return null;
       });
   }
 
-  pushToCartAttributes(2);
+  function bootstrapStoreBridge() {
+    readCartToken().then(function (cartToken) {
+      if (cartToken) {
+        postCidToWorker(cartToken);
+      }
+    });
+  }
+
+  function interceptCartMutation() {
+    var originalFetch = window.fetch;
+    if (typeof originalFetch !== 'function') return;
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) ? input.url : String(input);
+      if (/\/cart\/(add|update|change)\.js/i.test(url)) {
+        return originalFetch.apply(this, arguments).then(function (response) {
+          var clone = response.clone();
+          clone.json().catch(function () {}).finally(function () {
+            setTimeout(function () { bootstrapStoreBridge(); }, 200);
+          });
+          return response;
+        });
+      }
+      return originalFetch.apply(this, arguments);
+    };
+  }
+
+  function interceptCartMutationXhr() {
+    var originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (/\/cart\/(add|update|change)\.js/i.test(url)) {
+        this.addEventListener('load', function () {
+          setTimeout(function () { bootstrapStoreBridge(); }, 200);
+        });
+      }
+      return originalOpen.apply(this, arguments);
+    };
+  }
+
+  function syncFormFields() {
+    var fieldMap = {
+      'attributes[tb_click_id]': activeCid,
+      'attributes[click-id]': activeCid,
+      'attributes[tblci]': activeCid,
+      'attributes[taboola_click_id]': activeCid,
+      'attributes[tb_landing_page_url_original]': activeLanding || ''
+    };
+
+    Object.keys(fieldMap).forEach(function (name) {
+      var nodes = document.querySelectorAll('input[name="' + name + '"]');
+      nodes.forEach(function (node) {
+        node.value = fieldMap[name];
+        node.setAttribute('value', fieldMap[name]);
+      });
+    });
+
+    var landingInputs = document.querySelectorAll('#landing_page_url, input[name="landing_page_url"]');
+    landingInputs.forEach(function (node) {
+      if (activeLanding) {
+        node.value = activeLanding;
+        node.setAttribute('value', activeLanding);
+      }
+    });
+
+    var clickInputs = document.querySelectorAll('#tb_click_id, input[name="tb_click_id"], input[name="order_tag"], input[name="comment"], textarea[name="comment"]');
+    clickInputs.forEach(function (node) {
+      node.value = activeCid;
+      node.setAttribute('value', activeCid);
+    });
+
+    var checkoutForms = document.querySelectorAll('form[action*="/checkout"], form[action*="/cart"]');
+    checkoutForms.forEach(function (form) {
+      Object.keys(fieldMap).forEach(function (name) {
+        if (!form.querySelector('input[name="' + name + '"]')) {
+          var hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = name;
+          hidden.value = fieldMap[name];
+          form.appendChild(hidden);
+        }
+      });
+    });
+  }
+
+  bootstrapStoreBridge();
+
+  try { interceptCartMutation(); } catch (e) {}
+  try { interceptCartMutationXhr(); } catch (e) {}
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', syncFormFields, { once: true });
+  } else {
+    syncFormFields();
+  }
+
+  try {
+    var observer = new MutationObserver(function () { syncFormFields(); });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {}
+
+  try {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        bootstrapStoreBridge();
+      }
+    });
+  } catch (e) {}
 })();
 </script>

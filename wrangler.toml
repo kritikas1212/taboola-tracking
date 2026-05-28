@@ -6,3 +6,13 @@ compatibility_date = "2024-06-01"
 TABOOLA_ACCOUNT_ID = "1968303"
 TABOOLA_EVENT_NAME = "make_purchase"
 DEFAULT_CURRENCY = "INR"
+
+# Required for Shopify Admin API order lookups used to recover landing-page URLs.
+SHOPIFY_SHOP_DOMAIN = "uismgu-m5.myshopify.com"
+
+# Optional fallback config for Shopify Admin API lookup:
+# SHOPIFY_ADMIN_ACCESS_TOKEN should be added with `wrangler secret put SHOPIFY_ADMIN_ACCESS_TOKEN`
+
+[[kv_namespaces]]
+binding = "CID_STORE"
+id = "b4e3438802c94b7aa26d20aab4546806"
